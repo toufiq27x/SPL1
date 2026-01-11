@@ -12,7 +12,6 @@ A Pac-Man game implemented in C++ using the SFML library.
 #Requirements
 - C++17 compatible compiler
 - SFML 3.0
-- CMake 3.10+ (optional)
 
 #Installation
 - Linux / macOS
