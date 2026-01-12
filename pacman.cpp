@@ -3,6 +3,7 @@
 #include <vector>
 #include <fstream>
 #include <string>
+#include <cmath>
 
 using namespace std;
 
@@ -35,6 +36,8 @@ int remainingDots = 0;
 
 sf::RenderWindow window(sf::VideoMode({SCREEN_WIDTH, SCREEN_HEIGHT}), "Pac-Man Game");
 sf::Font font;
+
+float animationTime = 0.0f;
 
 void loadMazeFromFile(const string& filename) {
     ifstream file(filename);
@@ -85,6 +88,63 @@ void loadMazeFromFile(const string& filename) {
     }
 }
 
+void drawCircle(float x, float y, float radius, sf::Color color) {
+    sf::CircleShape circle(radius);
+    circle.setFillColor(color);
+    circle.setPosition({x - radius, y - radius});
+    window.draw(circle);
+}
+
+void drawMaze() {
+    for (int i = 0; i < ROWS; ++i) {
+        for (int j = 0; j < COLS; ++j) {
+            float x = j * CELL_SIZE;
+            float y = i * CELL_SIZE;
+
+            sf::RectangleShape cell(sf::Vector2f(CELL_SIZE, CELL_SIZE));
+            cell.setPosition({x, y});
+
+            switch (maze[i][j]) {
+                case WALL:
+                    cell.setFillColor(sf::Color(30, 60, 150));
+                    cell.setOutlineColor(sf::Color(50, 100, 200));
+                    cell.setOutlineThickness(1);
+                    window.draw(cell);
+                    break;
+                case OBSTACLE:
+                    cell.setFillColor(sf::Color(50, 50, 80));
+                    cell.setOutlineColor(sf::Color(80, 80, 120));
+                    cell.setOutlineThickness(1);
+                    window.draw(cell);
+                    break;
+                case DOT: {
+                    cell.setFillColor(sf::Color(10, 10, 20));
+                    window.draw(cell);
+                    float pulse = 1.0f + 0.3f * sin(animationTime * 5.0f);
+                    drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, 3 * pulse, sf::Color(255, 200, 100));
+                    break;
+                }
+                case POWER_UP: {
+                    cell.setFillColor(sf::Color(10, 10, 20));
+                    window.draw(cell);
+                    float powerPulse = 1.0f + 0.5f * sin(animationTime * 3.0f);
+                    drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, 8 * powerPulse, sf::Color(255, 215, 0));
+                    break;
+                }
+                case EMPTY:
+                    cell.setFillColor(sf::Color(10, 10, 20));
+                    window.draw(cell);
+                    break;
+            }
+        }
+    }
+
+    // Draw player
+    drawCircle(playerY * CELL_SIZE + CELL_SIZE / 2, 
+               playerX * CELL_SIZE + CELL_SIZE / 2, 
+               10, sf::Color(255, 255, 0));
+}
+
 int main() {
     if (!font.openFromFile("/System/Library/Fonts/Helvetica.ttc")) {
         if (!font.openFromFile("/System/Library/Fonts/Supplemental/Arial.ttf")) {
@@ -104,7 +164,10 @@ int main() {
             }
         }
         
-        window.clear(sf::Color::Black);
+        animationTime += 0.05f;
+        
+        window.clear(sf::Color(10, 10, 20));
+        drawMaze();
         window.display();
     }
     
