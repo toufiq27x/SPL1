@@ -9,7 +9,7 @@
 #include <cmath>
 
 using namespace std;
-
+// constants
 #define CELL_SIZE 20
 
 #define WALL 1
@@ -20,7 +20,7 @@ using namespace std;
 #define EMPTY 0
 
 const int SCREEN_WIDTH = 1000;
-const int SCREEN_HEIGHT = 620;
+const int SCREEN_HEIGHT = 700;
 
 vector<vector<int>> maze;
 int ROWS;
@@ -30,23 +30,24 @@ int playerX = 1;
 int playerY = 1;
 char playerDirection = 'd';
 
-int ghostCount = 2;
+int ghostCount;
 int ghostsX[10];
 int ghostsY[10];
 int ghostMoveCounter = 0;
-int ghostMoveFrequency = 5;
+int ghostMoveFrequency;
 
 int DX[] = {-1, 1, 0, 0};
 int DY[] = {0, 0, -1, 1};
 
 int score = 0;
+int level;
 bool gameOver = false;
 bool gameWon = false;
 bool invincible = false;
 
 int remainingDots = 0;
 const int MAX_RED_ZONES = 10;
-int redZoneCount = 1;
+int redZoneCount;
 int redZoneX[MAX_RED_ZONES];
 int redZoneY[MAX_RED_ZONES];
 
@@ -64,8 +65,16 @@ float mouthAnimation = 0.0f;
 void loadMazeFromFile(const string& filename);
 void initializeGhostPositions();
 bool isGhostAtPosition(int x, int y);
-void drawScoreAndTime(int elapsedTime);
+void setGhostCount(const string& level);
+void drawScoreAndLevel(int elapsedTime);
 void startGame(const string& levelFile);
+string selectLevel();
+vector<int> readScoresFromFile(const string& filename);
+void updateScores(const string& level, int newScore);
+string getLevelFromFile(const string& levelFile);
+void mainMenu();
+void displayScores(const string& level);
+void displayRules();
 
 struct Node {
     int x, y;
@@ -79,6 +88,46 @@ struct Node {
         return g + h;
     }
 };
+
+bool drawButton(float x, float y, float width, float height, const string& label, 
+                sf::Color bgColor = sf::Color(70, 130, 255), bool hovered = false) {
+    sf::RectangleShape shadow(sf::Vector2f(width, height));
+    shadow.setPosition({x + 5, y + 5});
+    shadow.setFillColor(sf::Color(0, 0, 0, 100));
+    window.draw(shadow);
+
+    sf::RectangleShape button(sf::Vector2f(width, height));
+    button.setPosition({x, y});
+    
+    if (hovered) {
+        bgColor.r = min(255, bgColor.r + 30);
+        bgColor.g = min(255, bgColor.g + 30);
+        bgColor.b = min(255, bgColor.b + 30);
+    }
+    
+    button.setFillColor(bgColor);
+    button.setOutlineColor(sf::Color(255, 255, 255, 180));
+    button.setOutlineThickness(3);
+    window.draw(button);
+
+    sf::RectangleShape highlight(sf::Vector2f(width - 10, height / 3));
+    highlight.setPosition({x + 5, y + 5});
+    highlight.setFillColor(sf::Color(255, 255, 255, 40));
+    window.draw(highlight);
+
+    sf::Text text(font, label, 24);
+    text.setFillColor(sf::Color::White);
+    text.setStyle(sf::Text::Bold);
+    sf::FloatRect textBounds = text.getLocalBounds();
+    float textWidth = textBounds.size.x;
+    float textHeight = textBounds.size.y;
+    text.setPosition({x + (width - textWidth) / 2, y + (height - textHeight) / 2 - 5});
+    window.draw(text);
+
+    sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+    return (mousePos.x >= x && mousePos.x <= x + width &&
+            mousePos.y >= y && mousePos.y <= y + height);
+}
 
 void drawText(const string& str, float x, float y, int size = 20, sf::Color color = sf::Color::White, bool bold = false) {
     sf::Text text(font, str, size);
@@ -161,6 +210,8 @@ void loadMazeFromFile(const string& filename) {
         if (row.size() > COLS) COLS = row.size();
     }
     
+    cout << "Maze dimensions: " << ROWS << " x " << COLS << endl;
+    
     maze.resize(ROWS, vector<int>(COLS, EMPTY));
     remainingDots = 0;
     
@@ -180,13 +231,17 @@ void loadMazeFromFile(const string& filename) {
         }
     }
 
+    cout << "Initial dots counted: " << remainingDots << endl;
+
     if (maze[playerX][playerY] == DOT) {
+        cout << "Clearing dot from player start position" << endl;
         remainingDots--;
         maze[playerX][playerY] = EMPTY;
     }
     
     for (int i = 0; i < ghostCount; ++i) {
         if (maze[ghostsX[i]][ghostsY[i]] == DOT) {
+            cout << "Clearing dot from ghost " << i << " start position" << endl;
             remainingDots--;
             maze[ghostsX[i]][ghostsY[i]] = EMPTY;
         }
@@ -200,6 +255,8 @@ void loadMazeFromFile(const string& filename) {
             }
         }
     }
+
+    cout << "Found " << explicitEmptyPositions.size() << " cells marked with 'E'" << endl;
 
     srand(time(0));
     int count = 0;
@@ -223,6 +280,9 @@ void loadMazeFromFile(const string& filename) {
         
         explicitEmptyPositions.erase(explicitEmptyPositions.begin() + randomIndex);
     }
+
+    cout << "Placed " << count << " red zones" << endl;
+    cout << "Final remaining dots: " << remainingDots << endl;
 }
 
 void drawMaze() {
@@ -316,7 +376,7 @@ void drawMaze() {
     }
 }
 
-void drawScoreAndTime(int elapsedTime) {
+void drawScoreAndLevel(int elapsedTime) {
     sf::RectangleShape hudPanel(sf::Vector2f(SCREEN_WIDTH, 80));
     hudPanel.setPosition({0, SCREEN_HEIGHT - 80});
     hudPanel.setFillColor(sf::Color(20, 20, 40, 230));
@@ -330,8 +390,11 @@ void drawScoreAndTime(int elapsedTime) {
     drawText("TIME", 250, SCREEN_HEIGHT - 70, 16, sf::Color(150, 150, 200));
     drawText(to_string(elapsedTime) + "s", 250, SCREEN_HEIGHT - 45, 28, sf::Color::White, true);
     
+    drawText("LEVEL", 450, SCREEN_HEIGHT - 70, 16, sf::Color(150, 150, 200));
+    drawText(to_string(level), 450, SCREEN_HEIGHT - 45, 28, sf::Color::White, true);
+    
     drawText("DOTS", 650, SCREEN_HEIGHT - 70, 16, sf::Color(150, 150, 200));
-drawText(to_string(remainingDots - 1), 650, SCREEN_HEIGHT - 45, 28, sf::Color(255, 200, 100), true);
+    drawText(to_string(remainingDots-1), 650, SCREEN_HEIGHT - 45, 28, sf::Color(255, 200, 100), true);
 
     if (ghostCooldown > 0) {
         sf::RectangleShape powerBar(sf::Vector2f(150, 30));
@@ -453,6 +516,14 @@ vector<Node> aStar(int startX, int startY, int goalX, int goalY) {
     return path;
 }
 
+void setGhostCount(const string& level) {
+    if (level == "easy_maze.txt") ghostCount = 2;
+    else if (level == "medium_maze.txt") ghostCount = 4;
+    else if (level == "hard_maze.txt") ghostCount = 6;
+    else ghostCount = 3;
+}
+
+// ghost initialize position 
 void initializeGhostPositions() {
     for (int i = 0; i < ghostCount; ++i) {
         ghostsX[i] = ROWS / 2 + i % 2;
@@ -475,6 +546,8 @@ void moveGhosts() {
 
         if (i == 0) { targetX = playerX - 1; }
         else if (i == 1) { targetX = playerX + 1; }
+        else if (i == 2) { targetX = playerX - 1; targetY = playerY - 1; }
+        else if (i == 3) { targetX = playerX + 1; targetY = playerY + 1; }
 
         if (rand() % 2 == 0) targetX += (rand() % 2) * 2 - 1;
         if (rand() % 2 == 0) targetY += (rand() % 2) * 2 - 1;
@@ -529,6 +602,7 @@ void movePlayer(char direction) {
 }
 
 void checkCollision() {
+    // Check red zone collision FIRST (instant death)
     for (int i = 0; i < redZoneCount; ++i) {
         if (playerX == redZoneX[i] && playerY == redZoneY[i]) {
             gameOver = true;
@@ -537,6 +611,7 @@ void checkCollision() {
         }
     }
     
+    // Check ghost collision (only if not invincible)
     if (!invincible) {
         for (int i = 0; i < ghostCount; ++i) {
             if (playerX == ghostsX[i] && playerY == ghostsY[i]) {
@@ -547,10 +622,337 @@ void checkCollision() {
         }
     }
     
+    // Check win condition LAST (so player can win by eating final dot)
     if (remainingDots <= 1) {
         gameOver = true;
         gameWon = true;
         return;
+    }
+}
+
+vector<int> readScoresFromFile(const string& filename) {
+    vector<int> scores;
+    ifstream file(filename);
+    if (file.is_open()) {
+        int score;
+        while (file >> score) {
+            scores.push_back(score);
+        }
+        file.close();
+    }
+    return scores;
+}
+
+void mergeSort(vector<int>& scores, int l, int h) {
+    if (l >= h) return;
+    
+    int mid = l + (h - l) / 2;
+    mergeSort(scores, l, mid);
+    mergeSort(scores, mid + 1, h);
+    
+    vector<int> temp;
+    int i = l, j = mid + 1;
+    
+    while (i <= mid && j <= h) {
+        if (scores[i] <= scores[j]) temp.push_back(scores[i++]);
+        else temp.push_back(scores[j++]);
+    }
+    while (i <= mid) temp.push_back(scores[i++]);
+    while (j <= h) temp.push_back(scores[j++]);
+    
+    for (int k = 0; k < temp.size(); k++) {
+        scores[l + k] = temp[k];
+    }
+}
+
+void updateScores(const string& level, int newScore) {
+    string filename;
+    if (level == "easy") filename = "easy_scores.txt";
+    else if (level == "medium") filename = "medium_scores.txt";
+    else if (level == "hard") filename = "hard_scores.txt";
+    else return;
+
+    vector<int> scores = readScoresFromFile(filename);
+    scores.push_back(newScore);
+    
+    mergeSort(scores, 0, scores.size() - 1);
+    reverse(scores.begin(), scores.end());
+    
+    if (scores.size() > 100) scores.resize(100);
+
+    ofstream outfile(filename);
+    for (int s : scores) {
+        outfile << s << endl;
+    }
+    outfile.close();
+}
+
+string getLevelFromFile(const string& levelFile) {
+    if (levelFile == "easy_maze.txt") return "easy";
+    if (levelFile == "medium_maze.txt") return "medium";
+    if (levelFile == "hard_maze.txt") return "hard";
+    return "unknown";
+}
+
+void displayRules() {
+    bool running = true;
+    
+    while (running && window.isOpen()) {
+        while (auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+                return;
+            }
+            if (const auto* keyPress = event->getIf<sf::Event::KeyPressed>()) {
+                if (keyPress->code == sf::Keyboard::Key::Escape) {
+                    return;
+                }
+            }
+        }
+
+        window.clear(sf::Color(15, 15, 30));
+
+        for (int i = 0; i < 20; i++) {
+            drawCircle(50 + i * 50, 50, 20, sf::Color(30, 60, 150, 50));
+        }
+
+        drawText("GAME RULES", 300, 40, 48, sf::Color(70, 130, 255), true);
+        
+        sf::RectangleShape ruleBox(sf::Vector2f(800, 60));
+        
+        ruleBox.setPosition({100, 130});
+        ruleBox.setFillColor(sf::Color(30, 40, 80, 150));
+        ruleBox.setOutlineColor(sf::Color(70, 130, 255));
+        ruleBox.setOutlineThickness(2);
+        window.draw(ruleBox);
+        drawText("Navigate the maze using W, A, S, D keys", 120, 145, 22, sf::Color::White);
+        
+        ruleBox.setPosition({100, 210});
+        window.draw(ruleBox);
+        drawText("Avoid red zones and ghosts", 120, 225, 22, sf::Color::White);
+        
+        ruleBox.setPosition({100, 290});
+        window.draw(ruleBox);
+        drawText("Collect ALL dots to win! +5 points each", 120, 305, 22, sf::Color::White);
+        
+        ruleBox.setPosition({100, 370});
+        window.draw(ruleBox);
+        drawText("Power-ups give +10 points & 5 moves of invincibility", 120, 385, 22, sf::Color::White);
+        
+        ruleBox.setPosition({100, 450});
+        window.draw(ruleBox);
+        drawText("Final score = (score / time) × 100", 120, 465, 22, sf::Color::White);
+
+        drawText("Press ESC to return", 350, 560, 24, sf::Color(150, 200, 255));
+
+        window.display();
+    }
+}
+
+void displayScores(const string& level) {
+    string filename;
+    if (level == "easy") filename = "easy_scores.txt";
+    else if (level == "medium") filename = "medium_scores.txt";
+    else if (level == "hard") filename = "hard_scores.txt";
+
+    vector<int> scores = readScoresFromFile(filename);
+
+    bool running = true;
+    
+    while (running && window.isOpen()) {
+        while (auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+                return;
+            }
+            if (const auto* keyPress = event->getIf<sf::Event::KeyPressed>()) {
+                if (keyPress->code == sf::Keyboard::Key::Escape) {
+                    return;
+                }
+            }
+        }
+
+        window.clear(sf::Color(15, 15, 30));
+
+        string title = "TOP SCORES - ";
+        title += (level == "easy" ? "EASY" : (level == "medium" ? "MEDIUM" : "HARD"));
+        
+        drawText(title, 280, 40, 42, sf::Color(70, 130, 255), true);
+
+        if (scores.empty()) {
+            drawText("No scores yet! Be the first!", 300, 300, 28, sf::Color(150, 150, 200));
+        } else {
+            int numScores = min(10, (int)scores.size());
+            
+            for (int i = 0; i < numScores; i++) {
+                sf::RectangleShape scoreBox(sf::Vector2f(600, 50));
+                scoreBox.setPosition({200.0f, 120.0f + i * 60.0f});
+                
+                sf::Color boxColor = (i == 0) ? sf::Color(255, 215, 0, 100) : 
+                                     (i == 1) ? sf::Color(192, 192, 192, 100) :
+                                     (i == 2) ? sf::Color(205, 127, 50, 100) :
+                                     sf::Color(40, 50, 90, 150);
+                
+                scoreBox.setFillColor(boxColor);
+                scoreBox.setOutlineColor(sf::Color(70, 130, 255));
+                scoreBox.setOutlineThickness(2);
+                window.draw(scoreBox);
+                
+                // string medal = (i == 0) ? "🥇 " : (i == 1) ? "🥈 " : (i == 2) ? "🥉 " : "";
+                // string scoreText = medal + to_string(i + 1) + ".  " + to_string(scores[i]) + " pts";
+                // drawText(scoreText, 220, 130 + i * 60, 28, sf::Color::White, true);
+
+                sf::Color rankColor = (i == 0) ? sf::Color(255, 215, 0) :
+                      (i == 1) ? sf::Color(192, 192, 192) :
+                      (i == 2) ? sf::Color(205, 127, 50) :
+                      sf::Color::White;
+
+string scoreText = to_string(i + 1) + ".  " + to_string(scores[i]) + " pts";
+drawText(scoreText, 220, 130 + i * 60, 28, rankColor, true);
+            }
+        }
+
+        drawText("Press ESC to return to menu", 320, 620, 22, sf::Color(150, 200, 255));
+
+        window.display();
+    }
+}
+
+string selectLevel() {
+    string levelFile = "";
+    bool selected = false;
+
+    while (!selected && window.isOpen()) {
+        while (auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+                return "";
+            }
+            if (const auto* keyPress = event->getIf<sf::Event::KeyPressed>()) {
+                if (keyPress->code == sf::Keyboard::Key::Escape) {
+                    return "";
+                }
+            }
+            if (const auto* mousePress = event->getIf<sf::Event::MouseButtonPressed>()) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                
+                if (mousePos.x >= 150 && mousePos.x <= 400 && mousePos.y >= 200 && mousePos.y <= 320) {
+                    level = 1;
+                    redZoneCount = 1;
+                    return "easy_maze.txt";
+                }
+                if (mousePos.x >= 425 && mousePos.x <= 675 && mousePos.y >= 200 && mousePos.y <= 320) {
+                    level = 2;
+                    redZoneCount = 3;
+                    return "medium_maze.txt";
+                }
+                if (mousePos.x >= 700 && mousePos.x <= 950 && mousePos.y >= 200 && mousePos.y <= 320) {
+                    level = 3;
+                    redZoneCount = 5;
+                    return "hard_maze.txt";
+                }
+            }
+        }
+
+        window.clear(sf::Color(15, 15, 30));
+
+        drawText("SELECT YOUR LEVEL", 280, 60, 48, sf::Color(70, 130, 255), true);
+        
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        
+        bool easyHover = (mousePos.x >= 150 && mousePos.x <= 400 && mousePos.y >= 200 && mousePos.y <= 320);
+        drawButton(150, 200, 250, 120, "", sf::Color(50, 150, 50), easyHover);
+        drawText("EASY", 220, 220, 32, sf::Color::White, true);
+        drawText("2 Ghosts", 200, 265, 18, sf::Color(200, 255, 200));
+        drawText("1 Red Zone", 195, 290, 18, sf::Color(200, 255, 200));
+        
+        bool mediumHover = (mousePos.x >= 425 && mousePos.x <= 675 && mousePos.y >= 200 && mousePos.y <= 320);
+        drawButton(425, 200, 250, 120, "", sf::Color(200, 150, 0), mediumHover);
+        drawText("MEDIUM", 470, 220, 32, sf::Color::White, true);
+        drawText("4 Ghosts", 475, 265, 18, sf::Color(255, 255, 200));
+        drawText("3 Red Zones", 470, 290, 18, sf::Color(255, 255, 200));
+        
+        bool hardHover = (mousePos.x >= 700 && mousePos.x <= 950 && mousePos.y >= 200 && mousePos.y <= 320);
+        drawButton(700, 200, 250, 120, "", sf::Color(180, 30, 30), hardHover);
+        drawText("HARD", 770, 220, 32, sf::Color::White, true);
+        drawText("6 Ghosts", 750, 265, 18, sf::Color(255, 200, 200));
+        drawText("5 Red Zones", 745, 290, 18, sf::Color(255, 200, 200));
+
+        drawText("Press ESC to return", 360, 500, 22, sf::Color(150, 200, 255));
+
+        window.display();
+    }
+
+    return levelFile;
+}
+
+void mainMenu() {
+    while (window.isOpen()) {
+        while (auto event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+                return;
+            }
+            if (const auto* mousePress = event->getIf<sf::Event::MouseButtonPressed>()) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                
+                if (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 200 && mousePos.y <= 280) {
+                    string levelFile = selectLevel();
+                    if (!levelFile.empty()) {
+                        startGame(levelFile);
+                    }
+                }
+
+                // else if (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 310 && mousePos.y <= 390) {
+                //     displayScores("easy");
+                // }
+                
+                else if (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 310 && mousePos.y <= 390) {
+    string lvl = selectLevel();
+    if (!lvl.empty()) {
+        displayScores(getLevelFromFile(lvl));
+    }
+}
+                else if (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 420 && mousePos.y <= 500) {
+                    displayRules();
+                }
+                else if (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 530 && mousePos.y <= 610) {
+                    window.close();
+                    return;
+                }
+            }
+        }
+
+        window.clear(sf::Color(15, 15, 30));
+
+        static float bgTime = 0;
+        bgTime += 0.02f;
+        for (int i = 0; i < 30; i++) {
+            float x = 100 + (i * 35) % 900;
+            float y = 100 + ((i * 35) / 900) * 100;
+            float pulse = 1.0f + 0.5f * sin(bgTime * 2 + i * 0.5f);
+            drawCircle(x, y, 8 * pulse, sf::Color(70, 130, 255, 30));
+        }
+
+        drawText("PAC-MAN", 285, 53, 72, sf::Color(0, 0, 0, 100), true);
+        drawText("PAC-MAN", 280, 50, 72, sf::Color(255, 215, 0), true);
+        drawText("GAME", 400, 125, 36, sf::Color(70, 130, 255), true);
+
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        
+        bool playHover = (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 200 && mousePos.y <= 280);
+        drawButton(300, 200, 400, 80, "PLAY GAME", sf::Color(70, 130, 255), playHover);
+        
+        bool scoresHover = (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 310 && mousePos.y <= 390);
+        drawButton(300, 310, 400, 80, "HIGH SCORES", sf::Color(60, 120, 200), scoresHover);
+        
+        bool rulesHover = (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 420 && mousePos.y <= 500);
+        drawButton(300, 420, 400, 80, "RULES", sf::Color(50, 110, 180), rulesHover);
+        
+        bool exitHover = (mousePos.x >= 300 && mousePos.x <= 700 && mousePos.y >= 530 && mousePos.y <= 610);
+        drawButton(300, 530, 400, 80, "EXIT", sf::Color(180, 30, 30), exitHover);
+
+        window.display();
     }
 }
 
@@ -564,10 +966,14 @@ void gameOverScreen(int finalScore, bool won) {
                 window.close();
                 return;
             }
-            if (const auto* keyPress = event->getIf<sf::Event::KeyPressed>()) {
-                if (keyPress->code == sf::Keyboard::Key::Escape || 
-                    keyPress->code == sf::Keyboard::Key::Space ||
-                    keyPress->code == sf::Keyboard::Key::Enter) {
+            if (const auto* mousePress = event->getIf<sf::Event::MouseButtonPressed>()) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+                
+                if (mousePos.x >= 250 && mousePos.x <= 550 && mousePos.y >= 350 && mousePos.y <= 430) {
+                    return;
+                }
+                if (mousePos.x >= 250 && mousePos.x <= 550 && mousePos.y >= 460 && mousePos.y <= 540) {
+                    window.close();
                     return;
                 }
             }
@@ -588,31 +994,38 @@ void gameOverScreen(int finalScore, bool won) {
         if (won) {
             for (int i = 0; i < 5; i++) {
                 float offset = i * 2;
-                drawText("YOU WIN!", 320 + offset, 150 + offset, 64, sf::Color(255, 255, 100, 50), true);
+                drawText("YOU WIN!", 320 + offset, 100 + offset, 64, sf::Color(255, 255, 100, 50), true);
             }
-            drawText("YOU WIN!", 320, 150, 64, sf::Color(255, 255, 0), true);
-            drawText("ALL DOTS COLLECTED!", 280, 230, 28, sf::Color(150, 255, 150), true);
+            drawText("YOU WIN!", 320, 100, 64, sf::Color(255, 255, 0), true);
+            drawText("ALL DOTS COLLECTED!", 280, 180, 28, sf::Color(150, 255, 150), true);
         } else {
-            drawText("GAME OVER!", 305, 153, 64, sf::Color(0, 0, 0, 100), true);
-            drawText("GAME OVER!", 300, 150, 64, sf::Color(255, 50, 50), true);
+            drawText("GAME OVER!", 305, 103, 64, sf::Color(0, 0, 0, 100), true);
+            drawText("GAME OVER!", 300, 100, 64, sf::Color(255, 50, 50), true);
         }
 
         sf::RectangleShape scorePanel(sf::Vector2f(500, 120));
-        scorePanel.setPosition({250, 280});
+        scorePanel.setPosition({250, 210});
         scorePanel.setFillColor(sf::Color(30, 40, 80, 200));
         scorePanel.setOutlineColor(sf::Color(70, 130, 255));
         scorePanel.setOutlineThickness(3);
         window.draw(scorePanel);
 
-        drawText("FINAL SCORE", 380, 300, 24, sf::Color(150, 150, 200));
-        drawText(to_string(finalScore), 430, 340, 48, sf::Color(255, 215, 0), true);
+        drawText("FINAL SCORE", 380, 230, 24, sf::Color(150, 150, 200));
+        drawText(to_string(finalScore), 430, 270, 48, sf::Color(255, 215, 0), true);
 
-        drawText("Press SPACE or ESC to exit", 320, 480, 22, sf::Color(150, 200, 255));
+        sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+        
+        bool menuHover = (mousePos.x >= 250 && mousePos.x <= 550 && mousePos.y >= 350 && mousePos.y <= 430);
+        drawButton(250, 350, 300, 80, "MAIN MENU", sf::Color(70, 130, 255), menuHover);
+        
+        bool exitHover = (mousePos.x >= 250 && mousePos.x <= 550 && mousePos.y >= 460 && mousePos.y <= 540);
+        drawButton(250, 460, 300, 80, "EXIT GAME", sf::Color(180, 30, 30), exitHover);
 
         window.display();
     }
 }
 
+// players initial position
 void startGame(const string& levelFile) {
     playerX = 1;
     playerY = 1;
@@ -626,10 +1039,18 @@ void startGame(const string& levelFile) {
     mouthAnimation = 0;
     invincible = false;
 
-    loadMazeFromFile(levelFile);
-    initializeGhostPositions();
+    
+    setGhostCount(levelFile);
+    loadMazeFromFile(levelFile);  
+    initializeGhostPositions();   
     
     startTime = time(0);
+    
+    string levelName = getLevelFromFile(levelFile);
+    
+    if (levelName == "easy") ghostMoveFrequency = 5;
+    else if (levelName == "medium") ghostMoveFrequency = 3;
+    else if (levelName == "hard") ghostMoveFrequency = 1;
 
     sf::Clock clock;
     
@@ -645,9 +1066,7 @@ void startGame(const string& levelFile) {
                     case sf::Keyboard::Key::S: movePlayer('s'); break;
                     case sf::Keyboard::Key::A: movePlayer('a'); break;
                     case sf::Keyboard::Key::D: movePlayer('d'); break;
-                    case sf::Keyboard::Key::Escape: 
-                        window.close();
-                        return;
+                    case sf::Keyboard::Key::Escape: return;
                     default: break;
                 }
                 checkCollision();
@@ -671,12 +1090,16 @@ void startGame(const string& levelFile) {
 
         window.clear(sf::Color(10, 10, 20));
         drawMaze();
-        drawScoreAndTime(elapsedTime);
+        drawScoreAndLevel(elapsedTime);
         window.display();
     }
 
     if (window.isOpen()) {
         int finalScore = (elapsedTime > 0) ? (score * 100 / elapsedTime) : score * 100;
+        
+        if (levelName != "unknown") {
+            updateScores(levelName, finalScore);
+        }
         gameOverScreen(finalScore, gameWon);
     }
 }
@@ -691,7 +1114,7 @@ int main() {
         }
     }
 
-    startGame("easy_maze.txt");
+    mainMenu();
 
     return 0;
 }
